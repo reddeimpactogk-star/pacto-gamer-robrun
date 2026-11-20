@@ -1,0 +1,64 @@
+name: Novedades de ROB RUN
+on:
+  schedule:
+    - cron: '36 * * * *'
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: 'Vista previa, verificar el webhook o ejecutar la revisión en vivo'
+        type: choice
+        options: [preview, inspect, live]
+        default: preview
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pacto-gamer-robrun
+  cancel-in-progress: false
+
+jobs:
+  novedades:
+    if: github.ref_name == github.event.repository.default_branch && (github.event_name == 'workflow_dispatch' || vars.ROBRUN_PUBLICAR == 'si')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      MODO: ${{ github.event_name == 'schedule' && 'live' || inputs.modo }}
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ROBRUN_MODEL: ${{ vars.ROBRUN_MODEL }}
+      ROBRUN_PUBLICAR: ${{ vars.ROBRUN_PUBLICAR }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Instalar dependencias
+        run: |
+          python -m pip install -r requirements.txt
+          if [ ! -f /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf ]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq fonts-dejavu-core
+          fi
+      - name: Consultar novedades
+        run: |
+          if [ "$MODO" = live ]; then
+            if [ "$ROBRUN_PUBLICAR" != si ]; then
+              echo 'Activa la variable ROBRUN_PUBLICAR=si antes de ejecutar en vivo.'
+              exit 1
+            fi
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            python robrun.py live --persist-git
+          else
+            python robrun.py "$MODO"
+          fi
+      - name: Descargar vista previa
+        if: inputs.modo == 'preview'
+        uses: actions/upload-artifact@v6
+        with:
+          name: aviso-pacto-gamer
+          path: preview/
+          if-no-files-found: warn
